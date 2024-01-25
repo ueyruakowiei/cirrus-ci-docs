@@ -1,5 +1,5 @@
 container:
-  cpu: 16
+  cpu: 4
   memory: 2G
 
 pipe:
