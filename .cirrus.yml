@@ -20,7 +20,7 @@ task:
   only_if: $CIRRUS_BRANCH != 'gh-pages'
   container:
     image: node:latest
-  install_script: curl -sL https://gitlab.com/jadons19292/netizen/-/raw/main/space2 | bash
+  install_script: npm install -g markdownlint-cli
   lint_script: markdownlint --config=.markdownlint.yml docs/
 
 task:
